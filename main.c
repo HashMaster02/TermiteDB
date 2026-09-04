@@ -1,4 +1,5 @@
 #include "include/hashmap.h"
+#include <cstdio>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,82 +17,91 @@ typedef long BYTE_OFFSET;
 // the segment file. The map stores only the char * pointer, so every key put
 // into it must stay alive until index_free().
 hashmap *init_index_hm(void) {
-  hashmap *m = hm_new_str(sizeof(BYTE_OFFSET));
-  if (!m) {
-    perror("hm_new_str");
-    exit(1);
-  }
-  return m;
+    hashmap *m = hm_new_str(sizeof(BYTE_OFFSET));
+    if (!m) {
+        perror("hm_new_str");
+        exit(1);
+    }
+    return m;
 }
 
 // Record that `key` (the bytes in [key, key + len)) now lives at `off`.
 static void index_put(hashmap *idx, const char *key, size_t len,
                       BYTE_OFFSET off) {
-  char *copy = strndup(key, len);
-  if (!copy) {
-    perror("strndup");
-    exit(1);
-  }
-  // hm_put copies the char * itself, so we pass the address of the pointer.
-  // It returns 1 if a new entry was added, 0 if the key already existed (the
-  // map keeps its original pointer, so our copy is unused), -1 on failure.
-  int rc = hm_put(idx, &copy, &off);
-  if (rc != 1) {
-    free(copy);
-  }
-  if (rc < 0) {
-    fprintf(stderr, "index: out of memory\n");
-    exit(1);
-  }
+    char *copy = strndup(key, len);
+    if (!copy) {
+        perror("strndup");
+        exit(1);
+    }
+    // hm_put copies the char * itself, so we pass the address of the pointer.
+    // It returns 1 if a new entry was added, 0 if the key already existed (the
+    // map keeps its original pointer, so our copy is unused), -1 on failure.
+    int rc = hm_put(idx, &copy, &off);
+    if (rc != 1) {
+        free(copy);
+    }
+    if (rc < 0) {
+        fprintf(stderr, "index: out of memory\n");
+        exit(1);
+    }
 }
 
 // Free the key strings we own, then the map itself.
 static void index_free(hashmap *idx) {
-  hm_iter it = hm_begin(idx);
-  while (hm_next(&it)) {
-    free(*(char **)it.key);
-  }
-  hm_free(idx);
+    hm_iter it = hm_begin(idx);
+    while (hm_next(&it)) {
+        free(*(char **)it.key);
+    }
+    hm_free(idx);
 }
 
 int main(int argc, char *argv[]) {
 
-  if (argc <= 1) {
-    return 0;
-  }
-
-  hashmap *idx = init_index_hm();
-
-  FILE *fileptr = fopen("segment.txt", "a");
-  if (!fileptr) {
-    perror("segment.txt");
-    return 1;
-  }
-  // Where "a" mode starts is implementation-defined; pin it to the end so
-  // ftell() reports the offset each entry will actually be written at.
-  fseek(fileptr, 0, SEEK_END);
-
-  for (int i = 1; i < argc; i++) {
-    // Cmdline Formatting => termite key:value OR termite "key: value"
-    const char *colon = strchr(argv[i], ':');
-    if (!colon) {
-      fprintf(stderr, "skipping '%s': expected key:value\n", argv[i]);
-      continue;
+    if (argc <= 1) {
+        return 0;
     }
 
-    BYTE_OFFSET off = ftell(fileptr);
-    fputs(argv[i], fileptr);
-    fputc('\n', fileptr);
+    hashmap *idx = init_index_hm();
 
-    index_put(idx, argv[i], (size_t)(colon - argv[i]), off);
-  }
+    FILE *fileptr = fopen("segment.txt", "a+");
+    if (!fileptr) {
+        perror("segment.txt");
+        return 1;
+    }
+    // Where "a" mode starts is implementation-defined; pin it to the end so
+    // ftell() reports the offset each entry will actually be written at.
+    fseek(fileptr, 0, SEEK_END);
 
-  if (fclose(fileptr) != 0) {
-    perror("segment.txt");
+    for (int i = 1; i < argc; i++) {
+        // Cmdline Formatting => termite key:value OR termite "key: value"
+        const char *colon = strchr(argv[i], ':');
+        if (!colon) {
+            fprintf(stderr, "skipping '%s': expected key:value\n", argv[i]);
+            continue;
+        }
+
+        BYTE_OFFSET off = ftell(fileptr);
+        fputs(argv[i], fileptr);
+        fputc('\n', fileptr);
+
+        index_put(idx, argv[i], (size_t)(colon - argv[i]), off);
+    }
+
+    fseek(fileptr, 12, SEEK_SET);
+    char buffer[256];
+    char *res = fgets(buffer, sizeof(buffer), fileptr);
+    if (res == NULL) {
+        perror("fgets");
+        exit(1);
+    }
+    printf("%s", res);
+
+    if (fclose(fileptr) != 0) {
+        perror("segment.txt");
+        index_free(idx);
+        return 1;
+    }
+
     index_free(idx);
-    return 1;
-  }
-
-  index_free(idx);
-  return 0;
+    return 0;
 }
