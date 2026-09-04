@@ -1,5 +1,5 @@
 #include "include/hashmap.h"
-#include <cstdio>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +12,76 @@
 //
 
 typedef long BYTE_OFFSET;
+
+hashmap *init_index_hm(void);
+static void index_put(hashmap *idx, const char *key, size_t len,
+                      BYTE_OFFSET off);
+static void index_free(hashmap *idx);
+
+void read_value(FILE *fileptr);
+
+int main(int argc, char *argv[]) {
+    if (argc <= 1) {
+        return 0;
+    }
+
+    hashmap *idx = init_index_hm();
+
+    FILE *fileptr = fopen("segment.txt", "a+");
+    if (!fileptr) {
+        perror("segment.txt");
+        return 1;
+    }
+
+    // Where "a" mode starts is implementation-defined; pin it to the end so
+    // ftell() reports the offset each entry will actually be written at.
+    fseek(fileptr, 0, SEEK_END);
+
+    for (int i = 1; i < argc; i++) {
+        // Cmdline Formatting => termite key:value OR termite "key: value"
+        const char *colon = strchr(argv[i], ':');
+        if (!colon) {
+            read_value(fileptr);
+            continue;
+        }
+
+        BYTE_OFFSET off = ftell(fileptr);
+        fputs(argv[i], fileptr);
+        fputc('\n', fileptr);
+
+        index_put(idx, argv[i], (size_t)(colon - argv[i]), off);
+    }
+
+    if (fclose(fileptr) != 0) {
+        perror("segment.txt");
+        index_free(idx);
+        return 1;
+    }
+
+    index_free(idx);
+    return 0;
+}
+
+void read_value(FILE *fileptr) {
+    fseek(fileptr, 12, SEEK_SET);
+    char buffer[256];
+    char *res = fgets(buffer, sizeof(buffer), fileptr);
+    if (res == NULL) {
+        perror("fgets");
+        exit(1);
+    }
+
+    char *value = strchr(buffer, ':'); // globe
+    if (value == NULL) {
+        fprintf(stderr, "strchr() + 1\n");
+        exit(1);
+    }
+    value += 1;
+
+    size_t val_len = strcspn(value, "\n");
+    value[val_len] = 0;
+    printf("%s", value);
+}
 
 // Maps a heap-allocated key string to the byte offset of its latest entry in
 // the segment file. The map stores only the char * pointer, so every key put
@@ -53,55 +123,4 @@ static void index_free(hashmap *idx) {
         free(*(char **)it.key);
     }
     hm_free(idx);
-}
-
-int main(int argc, char *argv[]) {
-
-    if (argc <= 1) {
-        return 0;
-    }
-
-    hashmap *idx = init_index_hm();
-
-    FILE *fileptr = fopen("segment.txt", "a+");
-    if (!fileptr) {
-        perror("segment.txt");
-        return 1;
-    }
-    // Where "a" mode starts is implementation-defined; pin it to the end so
-    // ftell() reports the offset each entry will actually be written at.
-    fseek(fileptr, 0, SEEK_END);
-
-    for (int i = 1; i < argc; i++) {
-        // Cmdline Formatting => termite key:value OR termite "key: value"
-        const char *colon = strchr(argv[i], ':');
-        if (!colon) {
-            fprintf(stderr, "skipping '%s': expected key:value\n", argv[i]);
-            continue;
-        }
-
-        BYTE_OFFSET off = ftell(fileptr);
-        fputs(argv[i], fileptr);
-        fputc('\n', fileptr);
-
-        index_put(idx, argv[i], (size_t)(colon - argv[i]), off);
-    }
-
-    fseek(fileptr, 12, SEEK_SET);
-    char buffer[256];
-    char *res = fgets(buffer, sizeof(buffer), fileptr);
-    if (res == NULL) {
-        perror("fgets");
-        exit(1);
-    }
-    printf("%s", res);
-
-    if (fclose(fileptr) != 0) {
-        perror("segment.txt");
-        index_free(idx);
-        return 1;
-    }
-
-    index_free(idx);
-    return 0;
 }
