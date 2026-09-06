@@ -18,7 +18,7 @@ static void index_put(hashmap *idx, const char *key, size_t len,
                       BYTE_OFFSET off);
 static void index_free(hashmap *idx);
 
-void read_value(FILE *fileptr);
+void read_value(FILE *fileptr, hashmap *index, char *const *key);
 
 int main(int argc, char *argv[]) {
     if (argc <= 1) {
@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
         // Cmdline Formatting => termite key:value OR termite "key: value"
         const char *colon = strchr(argv[i], ':');
         if (!colon) {
-            read_value(fileptr);
+            read_value(fileptr, idx, &argv[i]);
             continue;
         }
 
@@ -62,8 +62,14 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
-void read_value(FILE *fileptr) {
-    fseek(fileptr, 12, SEEK_SET);
+void read_value(FILE *fileptr, hashmap *index, char *const *key) {
+    BYTE_OFFSET *byte_offset = (BYTE_OFFSET *)hm_get(index, key);
+    if (byte_offset == NULL) {
+        fprintf(stderr, "Missing key");
+        return;
+    }
+
+    fseek(fileptr, *byte_offset, SEEK_SET);
     char buffer[256];
     char *res = fgets(buffer, sizeof(buffer), fileptr);
     if (res == NULL) {
