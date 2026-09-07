@@ -9,6 +9,7 @@
 // DONE: Maintain hashmap to byte-offset of the latest entry of a given
 // key-value pair
 // DONE: Read entry out of file
+// TODO: Delete an entry
 
 typedef long BYTE_OFFSET;
 
@@ -17,7 +18,8 @@ static void index_put(hashmap *idx, const char *key, size_t len,
                       BYTE_OFFSET off);
 static void index_free(hashmap *idx);
 
-void read_value(FILE *fileptr, hashmap *index, char *const *key);
+void read_value(hashmap *index, char *const *key, FILE *fileptr);
+void write_value(hashmap *index, char *entry, const char *colon, FILE *fileptr);
 void rebuild_index(hashmap *memcache, FILE *fileptr);
 
 int main(int argc, char *argv[]) {
@@ -45,16 +47,12 @@ int main(int argc, char *argv[]) {
         // Cmdline Formatting => termite key:value OR termite "key: value"
         const char *colon = strchr(argv[i], ':');
         if (!colon) {
-            read_value(fileptr, memcache, &argv[i]);
+            read_value(memcache, &argv[i], fileptr);
             fseek(fileptr, 0, SEEK_END);
             continue;
         }
 
-        BYTE_OFFSET off = ftell(fileptr);
-        fputs(argv[i], fileptr);
-        fputc('\n', fileptr);
-
-        index_put(memcache, argv[i], (size_t)(colon - argv[i]), off);
+        write_value(memcache, argv[i], colon, fileptr);
     }
 
     if (fclose(fileptr) != 0) {
@@ -89,7 +87,17 @@ void rebuild_index(hashmap *memcache, FILE *fileptr) {
     }
 }
 
-void read_value(FILE *fileptr, hashmap *index, char *const *key) {
+void write_value(hashmap *index, char *entry, const char *colon,
+                 FILE *fileptr) {
+
+    BYTE_OFFSET off = ftell(fileptr);
+    fputs(entry, fileptr);
+    fputc('\n', fileptr);
+
+    index_put(index, entry, (size_t)(colon - entry), off);
+}
+
+void read_value(hashmap *index, char *const *key, FILE *fileptr) {
     BYTE_OFFSET *byte_offset = (BYTE_OFFSET *)hm_get(index, key);
     if (byte_offset == NULL) {
         fprintf(stderr, "Missing key '%s'\n", *key);
@@ -116,9 +124,9 @@ void read_value(FILE *fileptr, hashmap *index, char *const *key) {
     printf("%s\n", value);
 }
 
-// Maps a heap-allocated key string to the byte offset of its latest entry in
-// the segment file. The map stores only the char * pointer, so every key put
-// into it must stay alive until index_free().
+// Maps a heap-allocated key string to the byte offset of its latest entry
+// in the segment file. The map stores only the char * pointer, so every key
+// put into it must stay alive until index_free().
 hashmap *init_index_hm(void) {
     hashmap *m = hm_new_str(sizeof(BYTE_OFFSET));
     if (!m) {
@@ -136,9 +144,10 @@ static void index_put(hashmap *idx, const char *key, size_t len,
         perror("strndup");
         exit(1);
     }
-    // hm_put copies the char * itself, so we pass the address of the pointer.
-    // It returns 1 if a new entry was added, 0 if the key already existed (the
-    // map keeps its original pointer, so our copy is unused), -1 on failure.
+    // hm_put copies the char * itself, so we pass the address of the
+    // pointer. It returns 1 if a new entry was added, 0 if the key already
+    // existed (the map keeps its original pointer, so our copy is unused),
+    // -1 on failure.
     int rc = hm_put(idx, &copy, &off);
     if (rc != 1) {
         free(copy);
