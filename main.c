@@ -8,8 +8,7 @@
 // DONE: Append key-value commandline appends to a file
 // DONE: Maintain hashmap to byte-offset of the latest entry of a given
 // key-value pair
-// TODO: Read latest entry out of file
-//
+// DONE: Read entry out of file
 
 typedef long BYTE_OFFSET;
 
@@ -19,18 +18,23 @@ static void index_put(hashmap *idx, const char *key, size_t len,
 static void index_free(hashmap *idx);
 
 void read_value(FILE *fileptr, hashmap *index, char *const *key);
+void rebuild_index(hashmap *memcache, FILE *fileptr);
 
 int main(int argc, char *argv[]) {
-    if (argc <= 1) {
-        return 0;
-    }
-
-    hashmap *idx = init_index_hm();
+    hashmap *memcache = init_index_hm();
 
     FILE *fileptr = fopen("segment.txt", "a+");
     if (!fileptr) {
         perror("segment.txt");
         return 1;
+    }
+
+    rebuild_index(memcache, fileptr);
+
+    if (argc <= 1) {
+        fclose(fileptr);
+        index_free(memcache);
+        return 0;
     }
 
     // Where "a" mode starts is implementation-defined; pin it to the end so
@@ -41,7 +45,8 @@ int main(int argc, char *argv[]) {
         // Cmdline Formatting => termite key:value OR termite "key: value"
         const char *colon = strchr(argv[i], ':');
         if (!colon) {
-            read_value(fileptr, idx, &argv[i]);
+            read_value(fileptr, memcache, &argv[i]);
+            fseek(fileptr, 0, SEEK_END);
             continue;
         }
 
@@ -49,23 +54,45 @@ int main(int argc, char *argv[]) {
         fputs(argv[i], fileptr);
         fputc('\n', fileptr);
 
-        index_put(idx, argv[i], (size_t)(colon - argv[i]), off);
+        index_put(memcache, argv[i], (size_t)(colon - argv[i]), off);
     }
 
     if (fclose(fileptr) != 0) {
         perror("segment.txt");
-        index_free(idx);
+        index_free(memcache);
         return 1;
     }
 
-    index_free(idx);
+    index_free(memcache);
     return 0;
+}
+
+void rebuild_index(hashmap *memcache, FILE *fileptr) {
+
+    char buffer[256];
+    BYTE_OFFSET curr_byte_offset = 0;
+    fseek(fileptr, curr_byte_offset, SEEK_SET);
+    while (1) {
+        curr_byte_offset = ftell(fileptr);
+        char *entry = fgets(buffer, sizeof(buffer), fileptr);
+        if (entry == NULL) {
+            break;
+        }
+
+        char *value = strchr(buffer, ':');
+        if (value == NULL) {
+            fprintf(stderr, "Malformed entry at byte %li\n", curr_byte_offset);
+            continue;
+        }
+
+        index_put(memcache, entry, value - entry, curr_byte_offset);
+    }
 }
 
 void read_value(FILE *fileptr, hashmap *index, char *const *key) {
     BYTE_OFFSET *byte_offset = (BYTE_OFFSET *)hm_get(index, key);
     if (byte_offset == NULL) {
-        fprintf(stderr, "Missing key");
+        fprintf(stderr, "Missing key '%s'\n", *key);
         return;
     }
 
@@ -73,7 +100,7 @@ void read_value(FILE *fileptr, hashmap *index, char *const *key) {
     char buffer[256];
     char *res = fgets(buffer, sizeof(buffer), fileptr);
     if (res == NULL) {
-        perror("fgets");
+        fprintf(stderr, "Byte past EOF reached\n");
         exit(1);
     }
 
@@ -86,7 +113,7 @@ void read_value(FILE *fileptr, hashmap *index, char *const *key) {
 
     size_t val_len = strcspn(value, "\n");
     value[val_len] = 0;
-    printf("%s", value);
+    printf("%s\n", value);
 }
 
 // Maps a heap-allocated key string to the byte offset of its latest entry in
