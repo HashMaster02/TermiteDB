@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define TOMBSTONE "~DEL~"
+
 // PART 1
 // DONE: Append key-value commandline appends to a file
 // DONE: Maintain hashmap to byte-offset of the latest entry of a given
@@ -138,7 +140,7 @@ void read_value(hashmap *index, char *const *key, FILE *fileptr) {
 }
 
 void delete_value(hashmap *memcache, char *key, FILE *fileptr) {
-    printf("Deleting %s\n", key);
+    fprintf(fileptr, "%s:%s\n", key, TOMBSTONE);
 }
 
 // Maps a heap-allocated key string to the byte offset of its latest entry
