@@ -10,6 +10,7 @@
 // key-value pair
 // DONE: Read entry out of file
 // TODO: Delete an entry
+// NOTE: Tombstone Marker: ~DEL~, CLI Syntax: `termite -d <key>
 
 typedef long BYTE_OFFSET;
 
@@ -21,6 +22,7 @@ static void index_free(hashmap *idx);
 void read_value(hashmap *index, char *const *key, FILE *fileptr);
 void write_value(hashmap *index, char *entry, const char *colon, FILE *fileptr);
 void rebuild_index(hashmap *memcache, FILE *fileptr);
+void delete_value(hashmap *memcache, char *key, FILE *fileptr);
 
 int main(int argc, char *argv[]) {
     hashmap *memcache = init_index_hm();
@@ -44,6 +46,17 @@ int main(int argc, char *argv[]) {
     fseek(fileptr, 0, SEEK_END);
 
     for (int i = 1; i < argc; i++) {
+        // Check for deletions first
+        if (strcmp(argv[i], "-d") == 0) {
+            if (!(i + 1 < argc)) {
+                fprintf(stderr, "no parameter provided to flag -d\n");
+                exit(1);
+            }
+            delete_value(memcache, argv[i + 1], fileptr);
+            i++;
+            continue;
+        }
+
         // Cmdline Formatting => termite key:value OR termite "key: value"
         const char *colon = strchr(argv[i], ':');
         if (!colon) {
@@ -122,6 +135,10 @@ void read_value(hashmap *index, char *const *key, FILE *fileptr) {
     size_t val_len = strcspn(value, "\n");
     value[val_len] = 0;
     printf("%s\n", value);
+}
+
+void delete_value(hashmap *memcache, char *key, FILE *fileptr) {
+    printf("Deleting %s\n", key);
 }
 
 // Maps a heap-allocated key string to the byte offset of its latest entry
