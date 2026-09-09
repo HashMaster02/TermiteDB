@@ -21,8 +21,9 @@ static void index_put(hashmap *idx, const char *key, size_t len,
                       BYTE_OFFSET off);
 static void index_free(hashmap *idx);
 
-void read_value(hashmap *index, char *const *key, FILE *fileptr);
-void write_value(hashmap *index, char *entry, const char *colon, FILE *fileptr);
+void read_value(hashmap *memcache, char *const *key, FILE *fileptr);
+void write_value(hashmap *memcache, char *entry, const char *colon,
+                 FILE *fileptr);
 void rebuild_index(hashmap *memcache, FILE *fileptr);
 void delete_value(hashmap *memcache, char *key, FILE *fileptr);
 
@@ -102,18 +103,18 @@ void rebuild_index(hashmap *memcache, FILE *fileptr) {
     }
 }
 
-void write_value(hashmap *index, char *entry, const char *colon,
+void write_value(hashmap *memcache, char *entry, const char *colon,
                  FILE *fileptr) {
 
     BYTE_OFFSET off = ftell(fileptr);
     fputs(entry, fileptr);
     fputc('\n', fileptr);
 
-    index_put(index, entry, (size_t)(colon - entry), off);
+    index_put(memcache, entry, (size_t)(colon - entry), off);
 }
 
-void read_value(hashmap *index, char *const *key, FILE *fileptr) {
-    BYTE_OFFSET *byte_offset = (BYTE_OFFSET *)hm_get(index, key);
+void read_value(hashmap *memcache, char *const *key, FILE *fileptr) {
+    BYTE_OFFSET *byte_offset = (BYTE_OFFSET *)hm_get(memcache, key);
     if (byte_offset == NULL) {
         fprintf(stderr, "Missing key '%s'\n", *key);
         return;
