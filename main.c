@@ -20,6 +20,7 @@ hashmap *init_index_hm(void);
 static void index_put(hashmap *idx, const char *key, size_t len,
                       BYTE_OFFSET off);
 static void index_free(hashmap *idx);
+static int index_delete(hashmap *idx, const char *key);
 
 void read_value(hashmap *memcache, char *const *key, FILE *fileptr);
 void write_value(hashmap *memcache, char *entry, const char *colon,
@@ -99,6 +100,12 @@ void rebuild_index(hashmap *memcache, FILE *fileptr) {
             continue;
         }
 
+        if (strncmp(value + 1, TOMBSTONE, strlen(TOMBSTONE)) == 0) {
+            *value = '\0'; // create a NULL-terminated string out of 'entry'
+            index_delete(memcache, entry);
+            continue;
+        }
+
         index_put(memcache, entry, value - entry, curr_byte_offset);
     }
 }
@@ -128,7 +135,7 @@ void read_value(hashmap *memcache, char *const *key, FILE *fileptr) {
         exit(1);
     }
 
-    char *value = strchr(buffer, ':'); // globe
+    char *value = strchr(buffer, ':');
     if (value == NULL) {
         fprintf(stderr, "strchr() + 1\n");
         exit(1);
@@ -142,6 +149,9 @@ void read_value(hashmap *memcache, char *const *key, FILE *fileptr) {
 
 void delete_value(hashmap *memcache, char *key, FILE *fileptr) {
     fprintf(fileptr, "%s:%s\n", key, TOMBSTONE);
+    if (!index_delete(memcache, key)) {
+        fprintf(stderr, "tried deleting missing key %s\n", key);
+    }
 }
 
 // Maps a heap-allocated key string to the byte offset of its latest entry
@@ -176,6 +186,17 @@ static void index_put(hashmap *idx, const char *key, size_t len,
         fprintf(stderr, "index: out of memory\n");
         exit(1);
     }
+}
+
+static int index_delete(hashmap *idx, const char *key) {
+    void *key_ptr = hm_get_key(idx, &key);
+    if (key_ptr == NULL) {
+        return 0;
+    }
+    char *key_str = *(char **)key_ptr;
+    hm_del(idx, &key);
+    free(key_str);
+    return 1;
 }
 
 // Free the key strings we own, then the map itself.
