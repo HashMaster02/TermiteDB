@@ -20,6 +20,7 @@ static void index_put(hashmap *idx, const char *key, size_t len,
                       BYTE_OFFSET off);
 static void index_free(hashmap *idx);
 static int index_delete(hashmap *idx, const char *key);
+static char *read_line(FILE *fileptr);
 
 void read_value(hashmap *memcache, char *const *key, FILE *fileptr);
 void write_value(hashmap *memcache, char *entry, const char *colon,
@@ -83,32 +84,34 @@ int main(int argc, char *argv[]) {
 
 void rebuild_index(hashmap *memcache, FILE *fileptr) {
 
-    // TODO: Keys greater than 256-bytes will be split, causing issues. At some
-    // point, implement a loop that calls fgets repeatedly and grows the buffer
-    // until the entire string can fit
-    char buffer[256];
     BYTE_OFFSET curr_byte_offset = 0;
+    char *entry;
     fseek(fileptr, curr_byte_offset, SEEK_SET);
     while (1) {
+
         curr_byte_offset = ftell(fileptr);
-        char *entry = fgets(buffer, sizeof(buffer), fileptr);
+        entry = read_line(fileptr);
         if (entry == NULL) {
             break;
         }
 
-        char *value = strchr(buffer, ':');
+        char *value = strchr(entry, ':');
         if (value == NULL) {
             fprintf(stderr, "Malformed entry at byte %li\n", curr_byte_offset);
+            free(entry);
             continue;
         }
 
         if (strncmp(value + 1, TOMBSTONE, strlen(TOMBSTONE)) == 0) {
             *value = '\0'; // create a NULL-terminated string out of 'entry'
             index_delete(memcache, entry);
+            free(entry);
             continue;
         }
 
         index_put(memcache, entry, value - entry, curr_byte_offset);
+
+        free(entry);
     }
 }
 
@@ -130,16 +133,17 @@ void read_value(hashmap *memcache, char *const *key, FILE *fileptr) {
     }
 
     fseek(fileptr, *byte_offset, SEEK_SET);
-    char buffer[256];
-    char *res = fgets(buffer, sizeof(buffer), fileptr);
+    char *res = read_line(fileptr);
     if (res == NULL) {
         fprintf(stderr, "Byte past EOF reached\n");
+        free(res);
         exit(1);
     }
 
-    char *value = strchr(buffer, ':');
+    char *value = strchr(res, ':');
     if (value == NULL) {
         fprintf(stderr, "strchr() + 1\n");
+        free(res);
         exit(1);
     }
     value += 1;
@@ -147,6 +151,8 @@ void read_value(hashmap *memcache, char *const *key, FILE *fileptr) {
     size_t val_len = strcspn(value, "\n");
     value[val_len] = 0;
     printf("%s\n", value);
+
+    free(res);
 }
 
 void delete_value(hashmap *memcache, char *key, FILE *fileptr) {
@@ -154,6 +160,47 @@ void delete_value(hashmap *memcache, char *key, FILE *fileptr) {
     if (!index_delete(memcache, key)) {
         fprintf(stderr, "tried deleting missing key %s\n", key);
     }
+}
+
+static char *read_line(FILE *fileptr) {
+
+    size_t buffer_size = 256;
+    char *buffer = (char *)calloc(buffer_size, sizeof(char));
+
+    char *chunk;
+    while (1) {
+        chunk = fgets(buffer + strlen(buffer), buffer_size - strlen(buffer),
+                      fileptr);
+
+        if (chunk == NULL) {
+            // reached EOF
+            break;
+        }
+
+        size_t len = strlen(chunk);
+        if (*(chunk + len - 1) != '\n') {
+            // Since the string is larger than our buffer, we must increase
+            // its capacity
+            void *tmp = realloc(buffer, buffer_size * 2);
+            if (tmp == NULL) {
+                fprintf(stderr, "realloc error on buffer");
+                exit(1);
+            }
+            buffer = tmp;
+
+            buffer_size *= 2;
+
+        } else {
+            break;
+        }
+    }
+
+    if (strlen(buffer) > 0) {
+        return buffer;
+    }
+
+    free(buffer);
+    return NULL;
 }
 
 // Maps a heap-allocated key string to the byte offset of its latest entry
