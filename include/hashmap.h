@@ -258,6 +258,12 @@ static inline void *hm_get(const hashmap *m, const void *key) {
     return i == SIZE_MAX ? NULL : hm__val(m, i);
 }
 
+/* Pointer to a stored key for `key`, or NULL if absent. */
+static inline void *hm_get_key(const hashmap *m, const void *key) {
+    size_t i = hm__find(m, key, hm__hash(m, key));
+    return i == SIZE_MAX ? NULL : hm__key(m, i);
+}
+
 /* Remove `key`. Returns 1 if it was present, 0 otherwise. */
 static inline int hm_del(hashmap *m, const void *key) {
     uint64_t h = hm__hash(m, key);
