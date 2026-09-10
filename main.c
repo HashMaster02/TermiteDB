@@ -11,8 +11,7 @@
 // DONE: Maintain hashmap to byte-offset of the latest entry of a given
 // key-value pair
 // DONE: Read entry out of file
-// TODO: Delete an entry
-// NOTE: Tombstone Marker: ~DEL~, CLI Syntax: `termite -d <key>
+// DONE: Delete an entry
 
 typedef long BYTE_OFFSET;
 
@@ -84,6 +83,9 @@ int main(int argc, char *argv[]) {
 
 void rebuild_index(hashmap *memcache, FILE *fileptr) {
 
+    // TODO: Keys greater than 256-bytes will be split, causing issues. At some
+    // point, implement a loop that calls fgets repeatedly and grows the buffer
+    // until the entire string can fit
     char buffer[256];
     BYTE_OFFSET curr_byte_offset = 0;
     fseek(fileptr, curr_byte_offset, SEEK_SET);
