@@ -20,10 +20,14 @@
 // TODO: Implement compaction
 
 typedef long BYTE_OFFSET;
+typedef struct {
+    int seg_id;
+    BYTE_OFFSET byte_offset;
+} Location;
 
 hashmap *init_index_hm(void);
 static void index_put(hashmap *idx, const char *key, size_t len,
-                      BYTE_OFFSET off);
+                      Location *value);
 static void index_free(hashmap *idx);
 static int index_delete(hashmap *idx, const char *key);
 static char *read_line(FILE *fileptr);
@@ -149,7 +153,8 @@ void rebuild_index(hashmap *memcache, FILE *fileptr) {
             continue;
         }
 
-        index_put(memcache, entry, value - entry, curr_byte_offset);
+        Location loc = {0, curr_byte_offset}; // TEMP
+        index_put(memcache, entry, value - entry, &loc);
 
         free(entry);
     }
@@ -162,17 +167,18 @@ void write_value(hashmap *memcache, char *entry, const char *colon,
     fputs(entry, fileptr);
     fputc('\n', fileptr);
 
-    index_put(memcache, entry, (size_t)(colon - entry), off);
+    Location loc = {0, off}; // TEMP
+    index_put(memcache, entry, (size_t)(colon - entry), &loc);
 }
 
 void read_value(hashmap *memcache, char *const *key, FILE *fileptr) {
-    BYTE_OFFSET *byte_offset = (BYTE_OFFSET *)hm_get(memcache, key);
-    if (byte_offset == NULL) {
+    Location *val_location = (Location *)hm_get(memcache, key);
+    if (val_location == NULL) {
         fprintf(stderr, "Missing key '%s'\n", *key);
         return;
     }
 
-    fseek(fileptr, *byte_offset, SEEK_SET);
+    fseek(fileptr, val_location->byte_offset, SEEK_SET);
     char *res = read_line(fileptr);
     if (res == NULL) {
         fprintf(stderr, "Byte past EOF reached\n");
@@ -247,7 +253,7 @@ static char *read_line(FILE *fileptr) {
 // in the segment file. The map stores only the char * pointer, so every key
 // put into it must stay alive until index_free().
 hashmap *init_index_hm(void) {
-    hashmap *m = hm_new_str(sizeof(BYTE_OFFSET));
+    hashmap *m = hm_new_str(sizeof(Location));
     if (!m) {
         perror("hm_new_str");
         exit(1);
@@ -255,9 +261,10 @@ hashmap *init_index_hm(void) {
     return m;
 }
 
-// Record that `key` (the bytes in [key, key + len)) now lives at `off`.
+// Record that `key` (the bytes in [key, key + len)) now lives at the given
+// location.
 static void index_put(hashmap *idx, const char *key, size_t len,
-                      BYTE_OFFSET off) {
+                      Location *value) {
     char *copy = strndup(key, len);
     if (!copy) {
         perror("strndup");
@@ -267,7 +274,7 @@ static void index_put(hashmap *idx, const char *key, size_t len,
     // pointer. It returns 1 if a new entry was added, 0 if the key already
     // existed (the map keeps its original pointer, so our copy is unused),
     // -1 on failure.
-    int rc = hm_put(idx, &copy, &off);
+    int rc = hm_put(idx, &copy, value);
     if (rc != 1) {
         free(copy);
     }
