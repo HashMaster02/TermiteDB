@@ -1,4 +1,6 @@
 #include "include/hashmap.h"
+#include <asm-generic/errno-base.h>
+#include <errno.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +15,10 @@
 // DONE: Read entry out of file
 // DONE: Delete an entry
 
+// PART 2
+// TODO: Implement segment rotation
+// TODO: Implement compaction
+
 typedef long BYTE_OFFSET;
 
 hashmap *init_index_hm(void);
@@ -21,6 +27,7 @@ static void index_put(hashmap *idx, const char *key, size_t len,
 static void index_free(hashmap *idx);
 static int index_delete(hashmap *idx, const char *key);
 static char *read_line(FILE *fileptr);
+static FILE *get_latest_segment();
 
 void read_value(hashmap *memcache, char *const *key, FILE *fileptr);
 void write_value(hashmap *memcache, char *entry, const char *colon,
@@ -29,14 +36,14 @@ void rebuild_index(hashmap *memcache, FILE *fileptr);
 void delete_value(hashmap *memcache, char *key, FILE *fileptr);
 
 int main(int argc, char *argv[]) {
-    hashmap *memcache = init_index_hm();
 
-    FILE *fileptr = fopen("segment.txt", "a+");
+    FILE *fileptr = get_latest_segment();
     if (!fileptr) {
-        perror("segment.txt");
+        perror("couldn't open latest segment file");
         return 1;
     }
 
+    hashmap *memcache = init_index_hm();
     rebuild_index(memcache, fileptr);
 
     if (argc <= 1) {
@@ -80,6 +87,39 @@ int main(int argc, char *argv[]) {
 
     index_free(memcache);
     return 0;
+}
+
+static FILE *get_latest_segment() {
+    signed int id = 0;
+    FILE *fileptr = NULL;
+
+    char filename[256];
+    while (fileptr == NULL) {
+        sprintf(filename, "./seg/segment-%03d.txt", id);
+        fileptr = fopen(filename, "r");
+        if (!fileptr && (errno == ENOENT)) {
+            id--;
+            break;
+        }
+        if (!fileptr) {
+            perror("error while probing segment files");
+            exit(1);
+        }
+        if (fclose(fileptr)) {
+            fprintf(stderr, "failed to close file: %s", filename);
+            exit(1);
+        }
+        fileptr = NULL;
+        id++;
+    }
+
+    if (id <= 0) {
+        id = 0;
+    }
+    sprintf(filename, "./seg/segment-%03d.txt", id);
+    fileptr = fopen(filename, "a+");
+
+    return fileptr;
 }
 
 void rebuild_index(hashmap *memcache, FILE *fileptr) {
