@@ -7,6 +7,7 @@
 #include <string.h>
 
 #define TOMBSTONE "~DEL~"
+#define MAX_SEGMENTS 10
 
 // PART 1
 // DONE: Append key-value commandline appends to a file
@@ -25,40 +26,52 @@ typedef struct {
     BYTE_OFFSET byte_offset;
 } Location;
 
+//  Keep every previous segment open to avoid running fopen multiple times
+typedef struct {
+    FILE *fileptrs[MAX_SEGMENTS]; // hardcoded for now. make dynamic later
+    int num_segs;
+    int active_seg_id;
+} Segments;
+
 hashmap *init_index_hm(void);
 static void index_put(hashmap *idx, const char *key, size_t len,
                       Location *value);
 static void index_free(hashmap *idx);
 static int index_delete(hashmap *idx, const char *key);
 static char *read_line(FILE *fileptr);
-static FILE *get_latest_segment();
+static int get_latest_segment(Segments *segments);
+static void close_all_segments(Segments *segments);
 
-void read_value(hashmap *memcache, char *const *key, FILE *fileptr);
+void read_value(hashmap *memcache, char *const *key, Segments *segments);
 void write_value(hashmap *memcache, char *entry, const char *colon,
-                 FILE *fileptr);
-void rebuild_index(hashmap *memcache, FILE *fileptr);
+                 Segments *segments);
+void rebuild_index(hashmap *memcache, Segments *segments);
 void delete_value(hashmap *memcache, char *key, FILE *fileptr);
 
 int main(int argc, char *argv[]) {
+    if (argc <= 1) {
+        return 0;
+    }
 
-    FILE *fileptr = get_latest_segment();
-    if (!fileptr) {
+    Segments segments = {
+        .fileptrs = {0},
+        .num_segs = 0,
+        .active_seg_id = -1,
+    };
+
+    if (get_latest_segment(&segments)) {
         perror("couldn't open latest segment file");
+        close_all_segments(&segments);
         return 1;
     }
 
     hashmap *memcache = init_index_hm();
-    rebuild_index(memcache, fileptr);
-
-    if (argc <= 1) {
-        fclose(fileptr);
-        index_free(memcache);
-        return 0;
-    }
+    rebuild_index(memcache, &segments);
 
     // Where "a" mode starts is implementation-defined; pin it to the end so
     // ftell() reports the offset each entry will actually be written at.
-    fseek(fileptr, 0, SEEK_END);
+    FILE *active_file = segments.fileptrs[segments.active_seg_id];
+    fseek(active_file, 0, SEEK_END);
 
     for (int i = 1; i < argc; i++) {
         // Check for deletions first
@@ -67,7 +80,7 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "no parameter provided to flag -d\n");
                 exit(1);
             }
-            delete_value(memcache, argv[i + 1], fileptr);
+            delete_value(memcache, argv[i + 1], active_file);
             i++;
             continue;
         }
@@ -75,109 +88,134 @@ int main(int argc, char *argv[]) {
         // Cmdline Formatting => termite key:value OR termite "key: value"
         const char *colon = strchr(argv[i], ':');
         if (!colon) {
-            read_value(memcache, &argv[i], fileptr);
-            fseek(fileptr, 0, SEEK_END);
+            read_value(memcache, &argv[i], &segments);
+            fseek(active_file, 0, SEEK_END);
             continue;
         }
 
-        write_value(memcache, argv[i], colon, fileptr);
+        write_value(memcache, argv[i], colon, &segments);
     }
 
-    if (fclose(fileptr) != 0) {
-        perror("segment.txt");
-        index_free(memcache);
-        return 1;
-    }
-
+    close_all_segments(&segments);
     index_free(memcache);
     return 0;
 }
 
-static FILE *get_latest_segment() {
+static int get_latest_segment(Segments *segments) {
     signed int id = 0;
     FILE *fileptr = NULL;
 
     char filename[256];
     while (fileptr == NULL) {
+        if (id >= MAX_SEGMENTS) {
+            fprintf(stderr,
+                    "maximum segments reached. increase MAX_SEGMENTS.\n");
+            return 1;
+        }
         sprintf(filename, "./seg/segment-%03d.txt", id);
         fileptr = fopen(filename, "r");
         if (!fileptr && (errno == ENOENT)) {
             id--;
+            if (id >= 0) {
+                if (fclose(segments->fileptrs[id])) {
+                    fprintf(stderr, "failed to close segment file with id %d\n",
+                            id);
+                }
+            }
             break;
         }
         if (!fileptr) {
             perror("error while probing segment files");
             exit(1);
         }
-        if (fclose(fileptr)) {
-            fprintf(stderr, "failed to close file: %s", filename);
-            exit(1);
-        }
+        segments->fileptrs[id] = fileptr;
         fileptr = NULL;
         id++;
     }
 
-    if (id <= 0) {
+    if (id < 0) {
         id = 0;
     }
     sprintf(filename, "./seg/segment-%03d.txt", id);
     fileptr = fopen(filename, "a+");
+    if (!fileptr) {
+        fprintf(stderr, "failed to open file with id %d in 'a+' mode\n", id);
+        exit(1);
+    }
+    segments->fileptrs[id] = fileptr;
+    segments->active_seg_id = id;
+    segments->num_segs = id + 1;
 
-    return fileptr;
+    return 0;
 }
 
-void rebuild_index(hashmap *memcache, FILE *fileptr) {
-
-    BYTE_OFFSET curr_byte_offset = 0;
-    char *entry;
-    fseek(fileptr, curr_byte_offset, SEEK_SET);
-    while (1) {
-
-        curr_byte_offset = ftell(fileptr);
-        entry = read_line(fileptr);
-        if (entry == NULL) {
-            break;
+static void close_all_segments(Segments *segments) {
+    for (int i = 0; i < segments->num_segs; i++) {
+        if (fclose(segments->fileptrs[i])) {
+            fprintf(stderr, "failed to close segment file with id %d\n", i);
         }
+    }
+}
 
-        char *value = strchr(entry, ':');
-        if (value == NULL) {
-            fprintf(stderr, "Malformed entry at byte %li\n", curr_byte_offset);
+void rebuild_index(hashmap *memcache, Segments *segments) {
+
+    for (int i = 0; i <= segments->active_seg_id; i++) {
+
+        BYTE_OFFSET curr_byte_offset = 0;
+        char *entry;
+        FILE *fileptr = segments->fileptrs[i];
+        fseek(fileptr, curr_byte_offset, SEEK_SET);
+        while (1) {
+
+            curr_byte_offset = ftell(fileptr);
+            entry = read_line(fileptr);
+            if (entry == NULL) {
+                break;
+            }
+
+            char *value = strchr(entry, ':');
+            if (value == NULL) {
+                fprintf(stderr, "Malformed entry at byte %li\n",
+                        curr_byte_offset);
+                free(entry);
+                continue;
+            }
+
+            if (strncmp(value + 1, TOMBSTONE, strlen(TOMBSTONE)) == 0) {
+                *value = '\0'; // create a NULL-terminated string out of 'entry'
+                index_delete(memcache, entry);
+                free(entry);
+                continue;
+            }
+
+            Location loc = {i, curr_byte_offset};
+            index_put(memcache, entry, value - entry, &loc);
+
             free(entry);
-            continue;
         }
-
-        if (strncmp(value + 1, TOMBSTONE, strlen(TOMBSTONE)) == 0) {
-            *value = '\0'; // create a NULL-terminated string out of 'entry'
-            index_delete(memcache, entry);
-            free(entry);
-            continue;
-        }
-
-        Location loc = {0, curr_byte_offset}; // TEMP
-        index_put(memcache, entry, value - entry, &loc);
-
-        free(entry);
     }
 }
 
 void write_value(hashmap *memcache, char *entry, const char *colon,
-                 FILE *fileptr) {
+                 Segments *segments) {
 
+    FILE *fileptr = segments->fileptrs[segments->active_seg_id];
     BYTE_OFFSET off = ftell(fileptr);
     fputs(entry, fileptr);
     fputc('\n', fileptr);
 
-    Location loc = {0, off}; // TEMP
+    Location loc = {segments->active_seg_id, off};
     index_put(memcache, entry, (size_t)(colon - entry), &loc);
 }
 
-void read_value(hashmap *memcache, char *const *key, FILE *fileptr) {
+void read_value(hashmap *memcache, char *const *key, Segments *segments) {
     Location *val_location = (Location *)hm_get(memcache, key);
     if (val_location == NULL) {
         fprintf(stderr, "Missing key '%s'\n", *key);
         return;
     }
 
+    FILE *fileptr = segments->fileptrs[val_location->seg_id];
     fseek(fileptr, val_location->byte_offset, SEEK_SET);
     char *res = read_line(fileptr);
     if (res == NULL) {
