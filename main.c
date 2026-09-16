@@ -18,7 +18,7 @@
 // DONE: Delete an entry
 
 // PART 2
-// TODO: Implement segment rotation
+// DONE: Implement segment rotation
 // TODO: Implement compaction
 
 typedef long BYTE_OFFSET;
