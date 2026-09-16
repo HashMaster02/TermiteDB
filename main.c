@@ -1,5 +1,4 @@
 #include "include/hashmap.h"
-#include <asm-generic/errno-base.h>
 #include <errno.h>
 #include <stddef.h>
 #include <stdio.h>
