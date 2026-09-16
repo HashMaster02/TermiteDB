@@ -8,6 +8,7 @@
 
 #define TOMBSTONE "~DEL~"
 #define MAX_SEGMENTS 10
+#define MAX_SEG_SIZE 12 // in bytes
 
 // PART 1
 // DONE: Append key-value commandline appends to a file
@@ -41,6 +42,7 @@ static int index_delete(hashmap *idx, const char *key);
 static char *read_line(FILE *fileptr);
 static int get_latest_segment(Segments *segments);
 static void close_all_segments(Segments *segments);
+static FILE *rotate_segment(Segments *segments);
 
 void read_value(hashmap *memcache, char *const *key, Segments *segments);
 void write_value(hashmap *memcache, char *entry, const char *colon,
@@ -81,6 +83,15 @@ int main(int argc, char *argv[]) {
                 exit(1);
             }
             delete_value(memcache, argv[i + 1], active_file);
+            // Begin a new segment if the current one has exceeded its maximum
+            // size
+            if (ftell(active_file) >= MAX_SEG_SIZE) {
+                active_file = rotate_segment(&segments);
+                if (!active_file) {
+                    fprintf(stderr, "rotate segment failure\n");
+                    exit(1);
+                }
+            }
             i++;
             continue;
         }
@@ -94,6 +105,15 @@ int main(int argc, char *argv[]) {
         }
 
         write_value(memcache, argv[i], colon, &segments);
+
+        // Begin a new segment if the current one has exceeded its maximum size
+        if (ftell(active_file) >= MAX_SEG_SIZE) {
+            active_file = rotate_segment(&segments);
+            if (!active_file) {
+                fprintf(stderr, "rotate segment failure\n");
+                exit(1);
+            }
+        }
     }
 
     close_all_segments(&segments);
@@ -155,6 +175,41 @@ static void close_all_segments(Segments *segments) {
             fprintf(stderr, "failed to close segment file with id %d\n", i);
         }
     }
+}
+
+static FILE *rotate_segment(Segments *segments) {
+    FILE *active_file = segments->fileptrs[segments->active_seg_id];
+    if (fclose(active_file)) {
+        fprintf(stderr, "failed to close active segment with id %d\n",
+                segments->active_seg_id);
+        return NULL;
+    }
+    char filename[256];
+    sprintf(filename, "./seg/segment-%03d.txt", segments->active_seg_id);
+    active_file = fopen(filename, "r");
+    if (!active_file) {
+        fprintf(stderr, "failed to open segment with id %d\n",
+                segments->active_seg_id);
+        return NULL;
+    }
+    segments->fileptrs[segments->active_seg_id] = active_file;
+
+    segments->active_seg_id++;
+    if (segments->active_seg_id >= MAX_SEGMENTS) {
+        fprintf(stderr, "maximum segments reached. increase MAX_SEGMENTS.\n");
+        return NULL;
+    }
+    sprintf(filename, "./seg/segment-%03d.txt", segments->active_seg_id);
+    active_file = fopen(filename, "a+");
+    if (!active_file) {
+        fprintf(stderr, "failed to open new active segment with id %d\n",
+                segments->active_seg_id);
+        return NULL;
+    }
+    segments->fileptrs[segments->active_seg_id] = active_file;
+    segments->num_segs++;
+
+    return active_file;
 }
 
 void rebuild_index(hashmap *memcache, Segments *segments) {
