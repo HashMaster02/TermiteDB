@@ -8,7 +8,7 @@
 
 #define TOMBSTONE "~DEL~"
 #define MAX_SEGMENTS 10
-#define MAX_SEG_SIZE 12 // in bytes
+#define MAX_SEG_SIZE 1024 // in bytes
 
 // PART 1
 // DONE: Append key-value commandline appends to a file
@@ -62,7 +62,7 @@ int main(int argc, char *argv[]) {
     };
 
     if (get_latest_segment(&segments)) {
-        perror("couldn't open latest segment file");
+        fprintf(stderr, "couldn't open latest segment file\n");
         close_all_segments(&segments);
         return 1;
     }
@@ -121,19 +121,17 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
+// NOTE: get_latest segment expects segments to be sequential. If there is a gap
+// in the segment IDs (id 0, 1, 3, 4 exist, but 2 does not) then the loop exits
+// and termite fails. This is worth solving later.
 static int get_latest_segment(Segments *segments) {
     signed int id = 0;
-    FILE *fileptr = NULL;
 
     char filename[256];
-    while (fileptr == NULL) {
-        if (id >= MAX_SEGMENTS) {
-            fprintf(stderr,
-                    "maximum segments reached. increase MAX_SEGMENTS.\n");
-            return 1;
-        }
+    while (1) {
         sprintf(filename, "./seg/segment-%03d.txt", id);
-        fileptr = fopen(filename, "r");
+        FILE *fileptr = fopen(filename, "r");
+
         if (!fileptr && (errno == ENOENT)) {
             id--;
             if (id >= 0) {
@@ -144,12 +142,18 @@ static int get_latest_segment(Segments *segments) {
             }
             break;
         }
+
         if (!fileptr) {
             perror("error while probing segment files");
             exit(1);
         }
+
+        if (id >= MAX_SEGMENTS) {
+            fprintf(stderr,
+                    "maximum segments reached. increase MAX_SEGMENTS.\n");
+            return 1;
+        }
         segments->fileptrs[id] = fileptr;
-        fileptr = NULL;
         id++;
     }
 
@@ -157,7 +161,7 @@ static int get_latest_segment(Segments *segments) {
         id = 0;
     }
     sprintf(filename, "./seg/segment-%03d.txt", id);
-    fileptr = fopen(filename, "a+");
+    FILE *fileptr = fopen(filename, "a+");
     if (!fileptr) {
         fprintf(stderr, "failed to open file with id %d in 'a+' mode\n", id);
         exit(1);
