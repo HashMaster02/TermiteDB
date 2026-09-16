@@ -42,6 +42,7 @@ static char *read_line(FILE *fileptr);
 static int get_latest_segment(Segments *segments);
 static void close_all_segments(Segments *segments);
 static FILE *rotate_segment(Segments *segments);
+static int compact_segments(hashmap *memcache, Segments *segments);
 
 void read_value(hashmap *memcache, char *const *key, Segments *segments);
 void write_value(hashmap *memcache, char *entry, const char *colon,
@@ -69,18 +70,43 @@ int main(int argc, char *argv[]) {
     hashmap *memcache = init_index_hm();
     rebuild_index(memcache, &segments);
 
+    // Check for the compaction command `-c`
+    if (argc == 2 && (strcmp(argv[1], "-c") == 0)) {
+        int error_code = 0;
+        printf("RUNNING COMPACTION\n");
+        if (compact_segments(memcache, &segments)) {
+            fprintf(stderr, "compaction operation failed\n");
+            error_code = 1;
+        }
+        close_all_segments(&segments);
+        index_free(memcache);
+        exit(error_code);
+    }
+
     // Where "a" mode starts is implementation-defined; pin it to the end so
     // ftell() reports the offset each entry will actually be written at.
     FILE *active_file = segments.fileptrs[segments.active_seg_id];
     fseek(active_file, 0, SEEK_END);
 
     for (int i = 1; i < argc; i++) {
+        // Check for compaction first
+        if (strcmp(argv[i], "-c") == 0) {
+            fprintf(
+                stderr,
+                "`-c` flag must be passed-in individually and not along with "
+                "other operations. Ignoring.\n");
+            continue;
+        }
+
         // Check for deletions first
         if (strcmp(argv[i], "-d") == 0) {
             if (!(i + 1 < argc)) {
                 fprintf(stderr, "no parameter provided to flag -d\n");
                 exit(1);
             }
+            // NOTE: We do not check if the paramter passed to -d is a
+            // flag. This could lead to silent bugs on the user end. This is
+            // worth solving later.
             delete_value(memcache, argv[i + 1], active_file);
             // Begin a new segment if the current one has exceeded its maximum
             // size
@@ -213,6 +239,14 @@ static FILE *rotate_segment(Segments *segments) {
     segments->num_segs++;
 
     return active_file;
+}
+
+static int compact_segments(hashmap *memcache, Segments *segments) {
+    (void)memcache;
+
+    printf("Compacting %d segments...\n", segments->active_seg_id);
+
+    return 0;
 }
 
 void rebuild_index(hashmap *memcache, Segments *segments) {
