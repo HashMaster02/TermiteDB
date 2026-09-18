@@ -43,6 +43,7 @@ static int get_latest_segment(Segments *segments);
 static void close_all_segments(Segments *segments);
 static FILE *rotate_segment(Segments *segments);
 static int compact_segments(hashmap *memcache, Segments *segments);
+static char *get_segment_filename(int id);
 
 void read_value(hashmap *memcache, char *const *key, Segments *segments);
 void write_value(hashmap *memcache, char *entry, const char *colon,
@@ -146,6 +147,12 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
+static char *get_segment_filename(int id) {
+    char *filename = (char *)malloc(256 * sizeof(char));
+    sprintf(filename, "./seg/segment-%03d.txt", id);
+    return filename;
+}
+
 // NOTE: get_latest segment expects segments to be sequential. If there is a gap
 // in the segment IDs (id 0, 1, 3, 4 exist, but 2 does not) then the loop exits
 // and termite fails. This is worth solving later.
@@ -154,7 +161,8 @@ static int get_latest_segment(Segments *segments) {
 
     char filename[256];
     while (1) {
-        sprintf(filename, "./seg/segment-%03d.txt", id);
+        sprintf(filename, "./seg/segment-%03d.txt",
+                id); // TODO: replace with function call
         FILE *fileptr = fopen(filename, "r");
 
         if (!fileptr && (errno == ENOENT)) {
@@ -185,7 +193,9 @@ static int get_latest_segment(Segments *segments) {
     if (id < 0) {
         id = 0;
     }
-    sprintf(filename, "./seg/segment-%03d.txt", id);
+    sprintf(filename, "./seg/segment-%03d.txt",
+            id); // TODO: replace with function call
+
     FILE *fileptr = fopen(filename, "a+");
     if (!fileptr) {
         fprintf(stderr, "failed to open file with id %d in 'a+' mode\n", id);
@@ -214,7 +224,9 @@ static FILE *rotate_segment(Segments *segments) {
         return NULL;
     }
     char filename[256];
-    sprintf(filename, "./seg/segment-%03d.txt", segments->active_seg_id);
+    sprintf(filename, "./seg/segment-%03d.txt",
+            segments->active_seg_id); // TODO: replace with function call
+
     active_file = fopen(filename, "r");
     if (!active_file) {
         fprintf(stderr, "failed to open segment with id %d\n",
@@ -228,7 +240,9 @@ static FILE *rotate_segment(Segments *segments) {
         fprintf(stderr, "maximum segments reached. increase MAX_SEGMENTS.\n");
         return NULL;
     }
-    sprintf(filename, "./seg/segment-%03d.txt", segments->active_seg_id);
+    sprintf(filename, "./seg/segment-%03d.txt",
+            segments->active_seg_id); // TODO: replace with function call
+
     active_file = fopen(filename, "a+");
     if (!active_file) {
         fprintf(stderr, "failed to open new active segment with id %d\n",
@@ -242,10 +256,32 @@ static FILE *rotate_segment(Segments *segments) {
 }
 
 static int compact_segments(hashmap *memcache, Segments *segments) {
-    (void)memcache;
+    FILE *tempfile = fopen("./seg/segment.temp", "w");
+    if (!tempfile) {
+        fprintf(stderr, "failed to open ./seg/segment.temp\n");
+        return 1;
+    }
 
-    printf("Compacting %d segments...\n", segments->active_seg_id);
+    hm_iter it = hm_begin(memcache);
+    while (hm_next(&it)) {
+        Location *loc = it.val;
+        if (loc->seg_id == segments->active_seg_id) {
+            continue;
+        }
+        FILE *fileptr = segments->fileptrs[loc->seg_id];
+        fseek(fileptr, loc->byte_offset, SEEK_SET);
+        char *entry = read_line(fileptr);
+        if (entry == NULL) {
+            continue;
+        }
+        fputs(entry, tempfile);
+        free(entry);
+    }
 
+    if (fclose(tempfile)) {
+        fprintf(stderr, "failed to close segment.temp");
+        return 1;
+    }
     return 0;
 }
 
