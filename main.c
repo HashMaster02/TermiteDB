@@ -159,11 +159,10 @@ static char *get_segment_filename(int id) {
 static int get_latest_segment(Segments *segments) {
     signed int id = 0;
 
-    char filename[256];
     while (1) {
-        sprintf(filename, "./seg/segment-%03d.txt",
-                id); // TODO: replace with function call
+        char *filename = get_segment_filename(id);
         FILE *fileptr = fopen(filename, "r");
+        free(filename);
 
         if (!fileptr && (errno == ENOENT)) {
             id--;
@@ -193,10 +192,10 @@ static int get_latest_segment(Segments *segments) {
     if (id < 0) {
         id = 0;
     }
-    sprintf(filename, "./seg/segment-%03d.txt",
-            id); // TODO: replace with function call
 
+    char *filename = get_segment_filename(id);
     FILE *fileptr = fopen(filename, "a+");
+    free(filename);
     if (!fileptr) {
         fprintf(stderr, "failed to open file with id %d in 'a+' mode\n", id);
         exit(1);
@@ -223,11 +222,10 @@ static FILE *rotate_segment(Segments *segments) {
                 segments->active_seg_id);
         return NULL;
     }
-    char filename[256];
-    sprintf(filename, "./seg/segment-%03d.txt",
-            segments->active_seg_id); // TODO: replace with function call
+    char *filename = get_segment_filename(segments->active_seg_id);
 
     active_file = fopen(filename, "r");
+    free(filename);
     if (!active_file) {
         fprintf(stderr, "failed to open segment with id %d\n",
                 segments->active_seg_id);
@@ -240,10 +238,10 @@ static FILE *rotate_segment(Segments *segments) {
         fprintf(stderr, "maximum segments reached. increase MAX_SEGMENTS.\n");
         return NULL;
     }
-    sprintf(filename, "./seg/segment-%03d.txt",
-            segments->active_seg_id); // TODO: replace with function call
+    filename = get_segment_filename(segments->active_seg_id);
 
     active_file = fopen(filename, "a+");
+    free(filename);
     if (!active_file) {
         fprintf(stderr, "failed to open new active segment with id %d\n",
                 segments->active_seg_id);
