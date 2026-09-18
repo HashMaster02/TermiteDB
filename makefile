@@ -1,6 +1,6 @@
 # Compiler settings
 CC = gcc
-CFLAGS = -Wall -Wextra -O2 -Iinclude
+CFLAGS = -Wall -Wextra -O0 -g -fsanitize=address -Iinclude 
 
 # Target executable name
 TARGET = termite
