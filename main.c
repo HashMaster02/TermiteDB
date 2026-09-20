@@ -21,7 +21,7 @@
 
 // PART 2
 // DONE: Implement segment rotation
-// TODO: Implement compaction
+// DONE: Implement compaction
 
 typedef long BYTE_OFFSET;
 typedef struct {
