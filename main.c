@@ -41,7 +41,6 @@ static void index_put(hashmap *idx, const char *key, size_t len,
                       Location *value);
 static void index_free(hashmap *idx);
 static int index_delete(hashmap *idx, const char *key);
-static char *read_line(FILE *fileptr);
 static int get_latest_segment(Segments *segments);
 static void close_all_segments(Segments *segments);
 static FILE *rotate_segment(Segments *segments);
@@ -53,6 +52,11 @@ void write_value(hashmap *memcache, char *entry, const char *colon,
                  Segments *segments);
 void rebuild_index(hashmap *memcache, Segments *segments);
 void delete_value(hashmap *memcache, char *key, FILE *fileptr);
+
+// Some cross-platform alternative POSIX functions
+static char *read_line(FILE *fileptr); // alternative to `getline`
+static char *my_strndup(const char *s, size_t n);
+static size_t my_strnlen(const char *src, size_t n);
 
 int main(int argc, char *argv[]) {
     if (argc <= 1) {
@@ -95,10 +99,9 @@ int main(int argc, char *argv[]) {
     for (int i = 1; i < argc; i++) {
         // Check for compaction first
         if (strcmp(argv[i], "-c") == 0) {
-            fprintf(
-                stderr,
-                "`-c` flag must be passed-in individually and not along with "
-                "other operations. Ignoring.\n");
+            fprintf(stderr, "`-c` flag must be passed-in individually and "
+                            "not along with "
+                            "other operations. Ignoring.\n");
             continue;
         }
 
@@ -112,8 +115,8 @@ int main(int argc, char *argv[]) {
             // flag. This could lead to silent bugs on the user end. This is
             // worth solving later.
             delete_value(memcache, argv[i + 1], active_file);
-            // Begin a new segment if the current one has exceeded its maximum
-            // size
+            // Begin a new segment if the current one has exceeded its
+            // maximum size
             if (ftell(active_file) >= MAX_SEG_SIZE) {
                 active_file = rotate_segment(&segments);
                 if (!active_file) {
@@ -135,7 +138,8 @@ int main(int argc, char *argv[]) {
 
         write_value(memcache, argv[i], colon, &segments);
 
-        // Begin a new segment if the current one has exceeded its maximum size
+        // Begin a new segment if the current one has exceeded its maximum
+        // size
         if (ftell(active_file) >= MAX_SEG_SIZE) {
             active_file = rotate_segment(&segments);
             if (!active_file) {
@@ -485,10 +489,9 @@ hashmap *init_index_hm(void) {
 // location.
 static void index_put(hashmap *idx, const char *key, size_t len,
                       Location *value) {
-    char *copy =
-        strndup(key, len); // TODO: This call does not exist on Windows.
+    char *copy = my_strndup(key, len);
     if (!copy) {
-        perror("strndup");
+        perror("my_strndup");
         exit(1);
     }
     // hm_put copies the char * itself, so we pass the address of the
@@ -523,4 +526,21 @@ static void index_free(hashmap *idx) {
         free(*(char **)it.key);
     }
     hm_free(idx);
+}
+
+static size_t my_strnlen(const char *src, size_t n) {
+    size_t len = 0;
+    while (len < n && src[len])
+        len++;
+    return len;
+}
+
+static char *my_strndup(const char *s, size_t n) {
+    size_t len = my_strnlen(s, n);
+    char *p = malloc(len + 1);
+    if (p) {
+        memcpy(p, s, len);
+        p[len] = '\0';
+    }
+    return p;
 }
