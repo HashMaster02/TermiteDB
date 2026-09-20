@@ -485,7 +485,8 @@ hashmap *init_index_hm(void) {
 // location.
 static void index_put(hashmap *idx, const char *key, size_t len,
                       Location *value) {
-    char *copy = strndup(key, len);
+    char *copy =
+        strndup(key, len); // TODO: This call does not exist on Windows.
     if (!copy) {
         perror("strndup");
         exit(1);
