@@ -9,6 +9,9 @@
 #define MAX_SEGMENTS 10
 #define MAX_SEG_SIZE 1024 // in bytes
 
+#define COMPACTED_SEGMENT_ID 0
+#define ACTIVE_SEGMENT_AFTER_COMPACTION_ID 1
+
 // PART 1
 // DONE: Append key-value commandline appends to a file
 // DONE: Maintain hashmap to byte-offset of the latest entry of a given
@@ -254,6 +257,10 @@ static FILE *rotate_segment(Segments *segments) {
 }
 
 static int compact_segments(hashmap *memcache, Segments *segments) {
+    if (segments->active_seg_id == 0) {
+        return 0;
+    }
+
     FILE *tempfile = fopen("./seg/segment.temp", "w");
     if (!tempfile) {
         fprintf(stderr, "failed to open ./seg/segment.temp\n");
@@ -264,6 +271,7 @@ static int compact_segments(hashmap *memcache, Segments *segments) {
     while (hm_next(&it)) {
         Location *loc = it.val;
         if (loc->seg_id == segments->active_seg_id) {
+            loc->seg_id = ACTIVE_SEGMENT_AFTER_COMPACTION_ID;
             continue;
         }
         FILE *fileptr = segments->fileptrs[loc->seg_id];
@@ -272,6 +280,8 @@ static int compact_segments(hashmap *memcache, Segments *segments) {
         if (entry == NULL) {
             continue;
         }
+        loc->seg_id = COMPACTED_SEGMENT_ID;
+        loc->byte_offset = ftell(tempfile);
         fputs(entry, tempfile);
         free(entry);
     }
@@ -280,6 +290,55 @@ static int compact_segments(hashmap *memcache, Segments *segments) {
         fprintf(stderr, "failed to close segment.temp");
         return 1;
     }
+
+    for (int id = 0; id < segments->active_seg_id; id++) {
+        if (fclose(segments->fileptrs[id])) {
+            fprintf(stderr, "failed to close segment file with id %d\n", id);
+            return 1;
+        }
+    }
+
+    if (rename("./seg/segment.temp", "./seg/segment-000.txt")) {
+        fprintf(stderr, "failed to rename segment.temp to segment-000.txt\n");
+        return 1;
+    }
+
+    for (int id = 1; id < segments->active_seg_id; id++) {
+        char *filename = get_segment_filename(id);
+        if (remove(filename)) {
+            fprintf(stderr, "failed to remove segment file with id %d\n", id);
+            free(filename);
+            return 1;
+        }
+        free(filename);
+    }
+
+    char *filename = get_segment_filename(segments->active_seg_id);
+    if (rename(filename, "./seg/segment-001.txt")) {
+        fprintf(stderr,
+                "failed to rename active segment file to segment-001.txt\n");
+        free(filename);
+        return 1;
+    }
+    free(filename);
+
+    tempfile = fopen("./seg/segment-000.txt", "r");
+    if (!tempfile) {
+        fprintf(stderr, "failed to open ./seg/segment-000.txt\n");
+        return 1;
+    }
+    segments->fileptrs[COMPACTED_SEGMENT_ID] = tempfile;
+
+    segments->fileptrs[ACTIVE_SEGMENT_AFTER_COMPACTION_ID] =
+        segments->fileptrs[segments->active_seg_id];
+
+    for (int id = 2; id <= segments->active_seg_id; id++) {
+        segments->fileptrs[id] = NULL;
+    }
+
+    segments->active_seg_id = ACTIVE_SEGMENT_AFTER_COMPACTION_ID;
+    segments->num_segs = 2;
+
     return 0;
 }
 
