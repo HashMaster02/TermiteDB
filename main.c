@@ -156,9 +156,6 @@ static char *get_segment_filename(int id) {
     return filename;
 }
 
-// NOTE: get_latest segment expects segments to be sequential. If there is a gap
-// in the segment IDs (id 0, 1, 3, 4 exist, but 2 does not) then the loop exits
-// and termite fails. This is worth solving later.
 static int get_latest_segment(Segments *segments) {
     signed int id = 0;
 
