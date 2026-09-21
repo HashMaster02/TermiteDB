@@ -5,6 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Overridden by the build: see VERSION in the makefile
+#ifndef VERSION
+#define VERSION "dev"
+#endif
+
 #define TOMBSTONE "~DEL~"
 #define MAX_SEGMENTS 10
 #define MAX_SEG_SIZE 1024 // in bytes
@@ -60,6 +65,12 @@ static size_t my_strnlen(const char *src, size_t n);
 
 int main(int argc, char *argv[]) {
     if (argc <= 1) {
+        return 0;
+    }
+
+    if (argc == 2 &&
+        (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-v") == 0)) {
+        printf("termite %s\n", VERSION);
         return 0;
     }
 
