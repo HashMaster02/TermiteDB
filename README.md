@@ -8,10 +8,12 @@ I was frustrated with having to copy-paste pieces of information from one source
 
 # Quick Start
 
-Download the Linux build from the [latest release](https://github.com/HashMaster02/termiteDB/releases/latest), then:
+Grab the build for your platform from the [latest release](https://github.com/HashMaster02/termiteDB/releases/latest).
+
+## Linux
 
 ```sh
-tar -xzf termite-v1.0.0-linux-x86_64.tar.gz
+tar -xzf termite-v1.0.1-linux-x86_64.tar.gz
 chmod +x termite
 ./termite --version
 ```
@@ -21,6 +23,29 @@ Move it onto your `PATH` if you want it available everywhere:
 ```sh
 sudo mv termite /usr/local/bin/
 ```
+
+## Windows
+
+```powershell
+Expand-Archive termite-v1.0.1-windows-x86_64.zip -DestinationPath .
+.\termite.exe --version
+```
+
+To make it available everywhere, put `termite.exe` in a directory on your `PATH`
+— for example a personal `bin` directory added to the user `PATH`:
+
+```powershell
+mkdir "$env:LOCALAPPDATA\Programs\bin" -Force
+move termite.exe "$env:LOCALAPPDATA\Programs\bin\"
+[Environment]::SetEnvironmentVariable(
+  "Path",
+  [Environment]::GetEnvironmentVariable("Path", "User") + ";$env:LOCALAPPDATA\Programs\bin",
+  "User")
+```
+
+Open a new terminal afterwards so the updated `PATH` takes effect.
+
+## First run
 
 TermiteDB keeps its data in a `seg/` directory inside whatever directory you run
 it from, and that directory must already exist:
