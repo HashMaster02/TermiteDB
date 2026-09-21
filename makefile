@@ -11,7 +11,7 @@ VERSION = 1.0.0
 VERFLAG = -DVERSION='"$(VERSION)"'
 
 ifeq ($(MODE), release)
-	CFLAGS = -Wall -Wextra -O3 -Iinclude -s $(VERFLAG)
+	CFLAGS = -Wall -Wextra -O3 -Iinclude -s -static $(VERFLAG)
 	TARGET = termite
 else
 	CFLAGS = -Wall -Wextra -O0 -g $(SANFLAGS) -Iinclude $(VERFLAG)
