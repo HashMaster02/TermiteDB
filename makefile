@@ -1,6 +1,12 @@
+ifeq ($(OS),Windows_NT)
+    SANFLAGS =
+else
+    SANFLAGS = -fsanitize=address
+endif
+
 # Compiler settings
 CC = gcc
-CFLAGS = -Wall -Wextra -O0 -g -fsanitize=address -Iinclude 
+CFLAGS = -Wall -Wextra -O0 -g $(SANFLAGS) -Iinclude 
 
 # Target executable name
 TARGET = termite
