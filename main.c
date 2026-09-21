@@ -5,6 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+
 // Overridden by the build: see VERSION in the makefile
 #ifndef VERSION
 #define VERSION "dev"
@@ -62,6 +67,7 @@ void delete_value(hashmap *memcache, char *key, FILE *fileptr);
 static char *read_line(FILE *fileptr); // alternative to `getline`
 static char *my_strndup(const char *s, size_t n);
 static size_t my_strnlen(const char *src, size_t n);
+static int replace_file(const char *src, const char *dst);
 
 int main(int argc, char *argv[]) {
     if (argc <= 1) {
@@ -224,6 +230,9 @@ static int get_latest_segment(Segments *segments) {
 
 static void close_all_segments(Segments *segments) {
     for (int i = 0; i < segments->num_segs; i++) {
+        if (!segments->fileptrs[i]) {
+            continue;
+        }
         if (fclose(segments->fileptrs[i])) {
             fprintf(stderr, "failed to close segment file with id %d\n", i);
         }
@@ -303,14 +312,16 @@ static int compact_segments(hashmap *memcache, Segments *segments) {
         return 1;
     }
 
-    for (int id = 0; id < segments->active_seg_id; id++) {
-        if (fclose(segments->fileptrs[id])) {
+    for (int id = 0; id <= segments->active_seg_id; id++) {
+        FILE *fileptr = segments->fileptrs[id];
+        segments->fileptrs[id] = NULL;
+        if (fclose(fileptr)) {
             fprintf(stderr, "failed to close segment file with id %d\n", id);
             return 1;
         }
     }
 
-    if (rename("./seg/segment.temp", "./seg/segment-000.txt")) {
+    if (replace_file("./seg/segment.temp", "./seg/segment-000.txt")) {
         fprintf(stderr, "failed to rename segment.temp to segment-000.txt\n");
         return 1;
     }
@@ -325,14 +336,16 @@ static int compact_segments(hashmap *memcache, Segments *segments) {
         free(filename);
     }
 
-    char *filename = get_segment_filename(segments->active_seg_id);
-    if (rename(filename, "./seg/segment-001.txt")) {
-        fprintf(stderr,
-                "failed to rename active segment file to segment-001.txt\n");
+    if (segments->active_seg_id != ACTIVE_SEGMENT_AFTER_COMPACTION_ID) {
+        char *filename = get_segment_filename(segments->active_seg_id);
+        if (replace_file(filename, "./seg/segment-001.txt")) {
+            fprintf(stderr, "failed to rename active segment file to "
+                            "segment-001.txt\n");
+            free(filename);
+            return 1;
+        }
         free(filename);
-        return 1;
     }
-    free(filename);
 
     tempfile = fopen("./seg/segment-000.txt", "r");
     if (!tempfile) {
@@ -341,12 +354,12 @@ static int compact_segments(hashmap *memcache, Segments *segments) {
     }
     segments->fileptrs[COMPACTED_SEGMENT_ID] = tempfile;
 
-    segments->fileptrs[ACTIVE_SEGMENT_AFTER_COMPACTION_ID] =
-        segments->fileptrs[segments->active_seg_id];
-
-    for (int id = 2; id <= segments->active_seg_id; id++) {
-        segments->fileptrs[id] = NULL;
+    FILE *active_file = fopen("./seg/segment-001.txt", "a+");
+    if (!active_file) {
+        fprintf(stderr, "failed to open ./seg/segment-001.txt\n");
+        return 1;
     }
+    segments->fileptrs[ACTIVE_SEGMENT_AFTER_COMPACTION_ID] = active_file;
 
     segments->active_seg_id = ACTIVE_SEGMENT_AFTER_COMPACTION_ID;
     segments->num_segs = 2;
@@ -544,6 +557,14 @@ static size_t my_strnlen(const char *src, size_t n) {
     while (len < n && src[len])
         len++;
     return len;
+}
+
+static int replace_file(const char *src, const char *dst) {
+#ifdef _WIN32
+    return MoveFileExA(src, dst, MOVEFILE_REPLACE_EXISTING) ? 0 : 1;
+#else
+    return rename(src, dst);
+#endif
 }
 
 static char *my_strndup(const char *s, size_t n) {
