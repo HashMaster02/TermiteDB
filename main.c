@@ -1,9 +1,12 @@
 #include "include/hashmap.h"
 #include <errno.h>
+#include <libloaderapi.h>
+#include <minwindef.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <winnt.h>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -68,6 +71,8 @@ static char *read_line(FILE *fileptr); // alternative to `getline`
 static char *my_strndup(const char *s, size_t n);
 static size_t my_strnlen(const char *src, size_t n);
 static int replace_file(const char *src, const char *dst);
+static char *get_bin_root();
+static char *get_absolute_filepath(const char *path[]);
 
 int main(int argc, char *argv[]) {
     if (argc <= 1) {
@@ -575,4 +580,75 @@ static char *my_strndup(const char *s, size_t n) {
         p[len] = '\0';
     }
     return p;
+}
+
+static char *get_bin_root() {
+#ifdef _WIN32
+    char *buffer = (char *)malloc(MAX_PATH);
+    if (!buffer) {
+        return NULL;
+    }
+
+    unsigned long len = GetModuleFileName(NULL, buffer, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH) {
+        free(buffer);
+        return NULL;
+    }
+
+    char *last_slash = strrchr(buffer, '\\');
+    if (last_slash != NULL) {
+        *last_slash = '\0';
+    }
+    return buffer;
+#else
+    // TODO : implement get_bin_root on Linux
+    printf("TODO: implement get_bin_root on Linux");
+#endif
+    return NULL;
+}
+
+static char *get_absolute_filepath(const char *dirs[]) {
+#ifdef _WIN32
+#define PATH_SEPARATOR_STR "\\"
+#define PATH_SEPARATOR_CHAR '\\'
+#else
+#define PATH_SEPARATOR_STR "/"
+#define PATH_SEPARATOR_CHAR '/'
+#endif
+
+    char *root = get_bin_root();
+    if (!root) {
+        fprintf(stderr, "failed to find binary root\n");
+        exit(1);
+    }
+
+    size_t total_size = strlen(root) + 1;
+
+    for (int i = 0; dirs[i] != NULL; i++) {
+        const char *name = dirs[i];
+        size_t str_len = strlen(name);
+        total_size += str_len;
+    }
+
+    char *abs_path = (char *)malloc(total_size);
+    if (!abs_path) {
+        return NULL;
+    }
+
+    strcpy(abs_path, root);
+
+    for (size_t i = 0; dirs[i] != NULL; i++) {
+        const char *name = dirs[i];
+
+        size_t curr_len = strlen(abs_path);
+        if (curr_len > 0 && abs_path[curr_len - 1] != PATH_SEPARATOR_CHAR) {
+            strcat(abs_path, PATH_SEPARATOR_STR);
+        }
+
+        strcat(abs_path, name);
+    }
+
+    free(root);
+
+    return abs_path;
 }
