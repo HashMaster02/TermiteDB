@@ -2,7 +2,7 @@
 CC = gcc
 
 # Single source of truth for the version. Bump this, then tag to match.
-VERSION = 1.0.1
+VERSION = 1.0.2
 VERFLAG = -DVERSION='"$(VERSION)"'
 
 # Platform-specific bits. gcc appends .exe on Windows, so the target has to
