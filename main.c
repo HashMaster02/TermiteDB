@@ -1,16 +1,20 @@
 #include "include/hashmap.h"
 #include <errno.h>
-#include <libloaderapi.h>
-#include <minwindef.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <winnt.h>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
+#include <libloaderapi.h>
+#include <minwindef.h>
 #include <windows.h>
+#include <winnt.h>
+#else
+#include <limits.h>
+#include <sys/types.h>
+#include <unistd.h>
 #endif
 
 // Overridden by the build: see VERSION in the makefile
@@ -631,8 +635,26 @@ static char *get_bin_root() {
     }
     return buffer;
 #else
-    // TODO : implement get_bin_root on Linux
-    printf("TODO: implement get_bin_root on Linux");
+    char *buffer = (char *)malloc(PATH_MAX);
+    if (!buffer) {
+        return NULL;
+    }
+
+    ssize_t count = readlink("/proc/self/exe", buffer, PATH_MAX);
+    if (count == -1) {
+        fprintf(stderr, "readlink error\n");
+        free(buffer);
+        return NULL;
+    }
+
+    buffer[count] = '\0';
+
+    char *last_slash = strrchr(buffer, '/');
+    if (last_slash != NULL) {
+        *last_slash = '\0';
+    }
+
+    return buffer;
 #endif
     return NULL;
 }
