@@ -59,6 +59,7 @@ static void close_all_segments(Segments *segments);
 static FILE *rotate_segment(Segments *segments);
 static int compact_segments(hashmap *memcache, Segments *segments);
 static char *get_segment_filename(int id);
+static char *get_seg_path(const char *name);
 
 void read_value(hashmap *memcache, char *const *key, Segments *segments);
 void write_value(hashmap *memcache, char *entry, const char *colon,
@@ -176,10 +177,20 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
+static char *get_seg_path(const char *name) {
+    const char *dirs[] = {"seg", name, NULL};
+    char *path = get_absolute_filepath(dirs);
+    if (!path) {
+        fprintf(stderr, "failed to build path for segment file '%s'\n", name);
+        exit(1);
+    }
+    return path;
+}
+
 static char *get_segment_filename(int id) {
-    char *filename = (char *)malloc(256 * sizeof(char));
-    sprintf(filename, "./seg/segment-%03d.txt", id);
-    return filename;
+    char name[32];
+    sprintf(name, "segment-%03d.txt", id);
+    return get_seg_path(name);
 }
 
 static int get_latest_segment(Segments *segments) {
@@ -287,9 +298,11 @@ static int compact_segments(hashmap *memcache, Segments *segments) {
         return 0;
     }
 
-    FILE *tempfile = fopen("./seg/segment.temp", "w");
+    char *temppath = get_seg_path("segment.temp");
+    FILE *tempfile = fopen(temppath, "w");
     if (!tempfile) {
-        fprintf(stderr, "failed to open ./seg/segment.temp\n");
+        fprintf(stderr, "failed to open %s\n", temppath);
+        free(temppath);
         return 1;
     }
 
@@ -314,6 +327,7 @@ static int compact_segments(hashmap *memcache, Segments *segments) {
 
     if (fclose(tempfile)) {
         fprintf(stderr, "failed to close segment.temp");
+        free(temppath);
         return 1;
     }
 
@@ -322,48 +336,64 @@ static int compact_segments(hashmap *memcache, Segments *segments) {
         segments->fileptrs[id] = NULL;
         if (fclose(fileptr)) {
             fprintf(stderr, "failed to close segment file with id %d\n", id);
+            free(temppath);
             return 1;
         }
     }
 
-    if (replace_file("./seg/segment.temp", "./seg/segment-000.txt")) {
+    char *compacted_path = get_segment_filename(COMPACTED_SEGMENT_ID);
+    if (replace_file(temppath, compacted_path)) {
         fprintf(stderr, "failed to rename segment.temp to segment-000.txt\n");
+        free(temppath);
+        free(compacted_path);
         return 1;
     }
+    free(temppath);
 
     for (int id = 1; id < segments->active_seg_id; id++) {
         char *filename = get_segment_filename(id);
         if (remove(filename)) {
             fprintf(stderr, "failed to remove segment file with id %d\n", id);
             free(filename);
+            free(compacted_path);
             return 1;
         }
         free(filename);
     }
+
+    char *new_active_path =
+        get_segment_filename(ACTIVE_SEGMENT_AFTER_COMPACTION_ID);
 
     if (segments->active_seg_id != ACTIVE_SEGMENT_AFTER_COMPACTION_ID) {
         char *filename = get_segment_filename(segments->active_seg_id);
-        if (replace_file(filename, "./seg/segment-001.txt")) {
+        if (replace_file(filename, new_active_path)) {
             fprintf(stderr, "failed to rename active segment file to "
                             "segment-001.txt\n");
             free(filename);
+            free(compacted_path);
+            free(new_active_path);
             return 1;
         }
         free(filename);
     }
 
-    tempfile = fopen("./seg/segment-000.txt", "r");
+    tempfile = fopen(compacted_path, "r");
     if (!tempfile) {
-        fprintf(stderr, "failed to open ./seg/segment-000.txt\n");
+        fprintf(stderr, "failed to open %s\n", compacted_path);
+        free(compacted_path);
+        free(new_active_path);
         return 1;
     }
+    free(compacted_path);
     segments->fileptrs[COMPACTED_SEGMENT_ID] = tempfile;
 
-    FILE *active_file = fopen("./seg/segment-001.txt", "a+");
+    FILE *active_file = fopen(new_active_path, "a+");
     if (!active_file) {
-        fprintf(stderr, "failed to open ./seg/segment-001.txt\n");
+        fprintf(stderr, "failed to open %s\n", new_active_path);
+        free(new_active_path);
         return 1;
     }
+    free(new_active_path);
     segments->fileptrs[ACTIVE_SEGMENT_AFTER_COMPACTION_ID] = active_file;
 
     segments->active_seg_id = ACTIVE_SEGMENT_AFTER_COMPACTION_ID;
@@ -627,7 +657,7 @@ static char *get_absolute_filepath(const char *dirs[]) {
     for (int i = 0; dirs[i] != NULL; i++) {
         const char *name = dirs[i];
         size_t str_len = strlen(name);
-        total_size += str_len;
+        total_size += str_len + 1;
     }
 
     char *abs_path = (char *)malloc(total_size);
